@@ -1,0 +1,245 @@
+#!/usr/bin/env python
+#
+# Copyright 2014 Corgan Labs
+# See LICENSE.txt for distribution terms
+#
+
+import os, sys, argparse, re
+from bip32utils import *
+
+# __main__ entrypoint at bottom
+
+def ReadInput(fname, count, is_hex):
+   "Read input from either stdin or file, optionally hex decoded"
+   f = sys.stdin if fname == '-' else open(fname, 'rb')
+
+   with f:
+      if count is not None:
+         n = count*2 if is_hex else count
+         data = f.read(n)
+      else:
+         data = f.read()
+
+   if is_hex:
+      data = data.strip().decode('hex')
+   return data
+
+
+def WriteOutput(fname, prefix, data, is_hex):
+   "Write output to either stdout or file, optionally hex encoded"
+   if is_hex:
+      data = data.encode('hex')
+   f= sys.stdout if fname == '-' else open(fname, 'w')
+   f.write(prefix+data+'\n')
+
+
+def ParseKeyspec(args, input_data, keyspec, cache):
+   """
+   Create a key from key specification with common args, storing
+   intermediate keys in a cache for reuse.
+
+   Assumes keyspec format already validated with regex.
+
+   There are three sources of input for key generation:
+
+   * Supplying entropy from stdin or file, from which
+     the master key and seed will be generated per BIP0032.
+     This is one option for keyspecs starting with 'm/...' or
+     'M/...'.  Keyspecs starting with 'M' result in public-
+     only keys.  From this master key, they keyspec is
+     recursively parsed to create child keys using the indices
+     found in the keyspec.
+
+   * Supplying an extended private key, which is imported back
+     into a normal key.  From this, normal or hardened child keys
+     are recursively derived using the private derivation algorithm
+     and index numbers in the keyspec.  The returned key is capable
+     of generating further normal or hardened child keys.
+
+   * Supplying an extended public key, which is imported back into
+     a public-only key.  From this, public-only keys are recursively
+     derived using the public derivation algorithm and index numbers
+     in the keyspec.  The returned key does not have a private key half
+     and is only further capable of generating publicly derived child
+     keys.
+   """
+   key = None
+   acc = ''
+
+   # Generate initial key, either from entropy, xprv, or xpub
+   if args.input_type == 'entropy':
+      acc = keyspec.split('/')[0]
+      try:
+         key = cache[acc]
+      except KeyError:
+         public = (acc == 'M')
+         key = BIP32Key.fromEntropy(entropy=input_data['entropy'], public=public)
+         cache[acc] = key
+   elif args.input_type == 'xprv':
+      try:
+         key = cache['xprv']
+      except KeyError:
+         key = BIP32Key.fromExtendedKey(input_data['xprv'])
+         cache['xprv'] = key
+   else:
+      try:
+         key = cache['xpub']
+      except KeyError:
+         key = BIP32Key.fromExtendedKey(input_data['xpub'])
+         cache['xpub'] = key
+
+   # Parse nodes, build up intermediate keys
+   for node in keyspec.split('/'):
+      if node in ['m', 'M']:
+         key = cache[node]
+      else:
+         # Descendent or relative node
+         if acc == '':
+            acc = node
+         else:
+            acc = acc + '/' + node
+
+         try:
+            key = cache[acc]
+         except KeyError:
+            if key is None:
+               key = cache[args.input_type]
+            # Now generate child keys
+            i = int(node.split('h')[0])
+            if 'h' in node:
+               i = i + BIP32_HARDEN
+            key = key.ChildKey(i)
+            cache[acc] = key
+   return key
+
+
+# Input sources
+
+def ReadEntropy(args):
+   "Reads optionally hex-encoded data from source"
+   entropy = ReadInput(args.from_file, args.amount/8, args.input_hex)
+   if len(entropy) < args.amount/8:
+      raise Exception("Insufficient entropy provided")
+   if args.verbose:
+      src = 'stdin' if args.from_file == '-' else args.from_file
+      print "Creating master key and seed using %i bits of entropy read from" % args.amount, src
+      print "entropy:", entropy.encode('hex')
+   return entropy
+
+
+valid_output_types = ['addr','privkey','wif','pubkey','xprv','xpub','chain']
+
+def GetArgs():
+   "Parse command line and validate inputs"
+   parser = argparse.ArgumentParser(description='Create hierarchical deterministic wallet addresses')
+   parser.add_argument('-x', '--input-hex', action='store_true', default=False,
+                       help='input supplied as hex-encoded ascii')
+   parser.add_argument('-X', '--output-hex', action='store_true', default=False,
+                       help='output generated (where applicable) as hex-encoded ascii')
+   parser.add_argument('-i', '--input-type', choices=['entropy','xprv','xpub'], required=True, action='store',
+                       help='source material to generate key')
+   parser.add_argument('-n', '--amount', type=int, default=128, action='store',
+                       help='amount of entropy to to read (bits), None for all of input')
+   parser.add_argument('-f', '--from-file', action='store', default='-',
+                       help="filespec of input data, '-' for stdin")
+   parser.add_argument('-F', '--to-file', action='store', default='-',
+                       help="filespec of output data, '-' for stdout")
+   parser.add_argument('-o', '--output-type', action='store', required=True,
+                       help='output types, comma separated, from %s' % '|'.join(valid_output_types))
+   parser.add_argument('-v', '--verbose', action='store_true', default=False,
+                       help='verbose output, not for machine parsing')
+   parser.add_argument('-d', '--debug', action='store_true', default=False,
+                       help='enable debugging output')
+   parser.add_argument('chain', nargs='+',
+                        help='list of hierarchical key specifiers')
+
+   args = parser.parse_args()
+
+   # Validate -f, --from-file is readable
+   ff = args.from_file
+   if ff != '-' and os.access(ff, os.R_OK) is False:
+      raise ValueError("unable to read from %s, aborting" % ff)
+
+   # Validate -F, --to-file parent dir is writeable
+   tf = args.to_file
+   if tf != '-':
+      pd = os.path.dirname(os.path.abspath(tf))
+      if os.access(pd, os.W_OK) is False:
+            raise ValueError("do not have permissions to create file in %s, aborting\n" % pd)
+
+   # Validate -o, --output-type
+   for o in args.output_type.split(','):
+      if o not in valid_output_types:
+         valid_output_display = '['+'|'.join(valid_output_types)+']'
+         raise ValueError("output type \'%s\' is not one of %s\n" % (o, valid_output_display))
+
+   # Validate keyspecs for syntax
+   for keyspec in args.chain:
+      if not re.match("^([mM]|[0-9]+h?)(/[0-9]+h?)*$", keyspec):
+         raise ValueError("chain %s is not valid\n" % keyspec)
+      # If input is from entropy, keyspec must be absolute
+      elif args.input_type == 'entropy' and keyspec[0] not in 'mM':
+         raise ValueError("When generating from entropy, keyspec must start with 'm' or 'M'")
+      # Importing extended private or public keys need relative keyspecs
+      elif args.input_type in ['xpub','xprv'] and keyspec[0] in 'mM':
+         raise ValueError("When generating from xprv or xpub, keyspec must start with 0..9")
+
+   return args
+
+
+def ErrorExit(e):
+   "Hard bailout printing exception"
+   sys.stderr.write(sys.argv[0]+": "+e.message+'\n')
+   sys.exit(1)
+
+
+if __name__ == "__main__":
+   try:
+      args = GetArgs()
+   except Exception as e:
+      ErrorExit(e)
+
+   # Get common input data
+   input_data = {}
+   try:
+      if args.input_type == 'entropy':
+         input_data['entropy'] = ReadEntropy(args)
+      elif args.input_type == 'xprv':
+         if args.verbose:
+            print "Importing starting key from extended private key"
+         input_data['xprv'] = ReadInput(args.from_file, None, False).strip()
+      elif args.input_type == 'xpub':
+         if args.verbose:
+            print "Importing starting key from extended public key"
+         input_data['xpub'] = ReadInput(args.from_file, None, False).strip()
+   except Exception as e:
+      ErrorExit(e)
+
+   # Iterate through keyspecs, create, then output
+   cache = {}
+   otypes = args.output_type.split(',')
+
+   for keyspec in args.chain:
+      if args.verbose:
+         print "Keyspec:", keyspec
+      key = ParseKeyspec(args, input_data, keyspec, cache)
+
+      # Output fields in command-line supplied order
+      for otype in otypes:
+         prefix = '' if not args.verbose else otype+':'+' '*(8-len(otype))
+         if otype == 'addr':
+            WriteOutput(args.to_file, prefix, key.Address(), False)
+         elif otype == 'privkey':
+            WriteOutput(args.to_file, prefix, key.PrivateKey(), args.output_hex)
+         elif otype == 'wif':
+            WriteOutput(args.to_file, prefix, key.WalletImportFormat(), False)
+         elif otype == 'pubkey':
+            WriteOutput(args.to_file, prefix, key.PublicKey(), args.output_hex)
+         elif otype == 'xprv':
+            WriteOutput(args.to_file, prefix, key.ExtendedKey(private=True, encoded=True), False)
+         elif otype == 'xpub':
+            WriteOutput(args.to_file, prefix, key.ExtendedKey(private=False, encoded=True), False)
+         elif otype == 'chain':
+            WriteOutput(args.to_file, prefix, key.ChainCode(), args.output_hex)
+      if args.verbose:
+         WriteOutput(args.to_file, '', '', False)
