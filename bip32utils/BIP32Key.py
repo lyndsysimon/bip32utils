@@ -20,7 +20,8 @@ MIN_ENTROPY_LEN = 128        # bits
 BIP32_HARDEN    = 0x80000000 # choose from hardened set of child keys
 CURVE_GEN       = ecdsa.ecdsa.generator_secp256k1
 CURVE_ORDER     = CURVE_GEN.order()
-CURVE_PRIME     = SECP256k1.curve.p()
+FIELD_ORDER     = SECP256k1.curve.p()
+INFINITY        = ecdsa.ellipticcurve.INFINITY
 
 class BIP32Key(object):
 
@@ -32,7 +33,7 @@ class BIP32Key(object):
         if entropy == None:
             entropy = os.urandom(MIN_ENTROPY_LEN/8) # Python doesn't have os.random()
         if not len(entropy) >= MIN_ENTROPY_LEN/8:
-            raise ValueError("Initial wallet entropy %i must be at least %i bits" %
+            raise ValueError("Initial entropy %i must be at least %i bits" %
                                 (len(entropy), MIN_ENTROPY_LEN))
         I = hmac.new("Bitcoin seed", entropy, hashlib.sha512).digest()
         Il, Ir = I[:32], I[32:]
@@ -81,10 +82,10 @@ class BIP32Key(object):
             # Recover public curve point from compressed key
             lsb = ord(secret[0]) & 1
             x = string_to_int(secret[1:])
-            ys = (x**3+7) % CURVE_PRIME # y^2 = x^3 + 7 mod p
-            y = sqrt_mod(ys, CURVE_PRIME)
+            ys = (x**3+7) % FIELD_ORDER # y^2 = x^3 + 7 mod p
+            y = sqrt_mod(ys, FIELD_ORDER)
             if y & 1 != lsb:
-                y = CURVE_PRIME-y
+                y = FIELD_ORDER-y
             point = ecdsa.ellipticcurve.Point(SECP256k1.curve, x, y)
             secret = ecdsa.VerifyingKey.from_public_point(point, curve=SECP256k1)
 
@@ -149,7 +150,8 @@ class BIP32Key(object):
         If the most significant bit of 'i' is set, then select from the
         hardened key set, otherwise, select a regular child key.
 
-        Returns a BIP32Key constructed with the child key parameters.
+        Returns a BIP32Key constructed with the child key parameters,
+        or None if i index would result in an invalid key.
         """
         # Index as bytes, BE
         i_str = struct.pack(">L", i)
@@ -165,8 +167,12 @@ class BIP32Key(object):
 
         # Construct new key material from Il and current private key
         Il_int = string_to_int(Il)
+        if Il_int > CURVE_ORDER:
+            return None
         pvt_int = string_to_int(self.k.to_string())
         k_int = (Il_int + pvt_int) % CURVE_ORDER
+        if (k_int == 0):
+            return None
         secret = int_to_string(k_int)
 
         # Construct and return a new BIP32Key
@@ -180,7 +186,8 @@ class BIP32Key(object):
         If the most significant bit of 'i' is set, this is
         an error.
 
-        Returns a BIP32Key constructed with the child key parameters.
+        Returns a BIP32Key constructed with the child key parameters,
+        or None if index would result in invalid key.
         """
 
         if i & BIP32_HARDEN:
@@ -194,12 +201,16 @@ class BIP32Key(object):
 
         # Construct curve point Il*G+K
         Il_int = string_to_int(Il)
+        if Il_int >= CURVE_ORDER:
+            return None
         point = Il_int*CURVE_GEN + self.K.pubkey.point
+        if point == INFINITY:
+            return None
 
         # Retrieve public key based on curve point
         K_i = ecdsa.VerifyingKey.from_public_point(point, curve=SECP256k1)
 
-        # Construct and return a new WalletNode
+        # Construct and return a new BIP32Key
         return BIP32Key(secret=K_i, chain=Ir, depth=self.depth, index=i, fpr=self.Fingerprint(), public=True)
 
 
