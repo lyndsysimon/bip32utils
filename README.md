@@ -97,7 +97,7 @@ ECDSA key, address, and serialized extended private and public keys,
 hex encoding where applicable, and writing to stdout:
 
 ```
-$echo 000102030405060708090A0B0C0D0E0F | \
+$ echo 000102030405060708090A0B0C0D0E0F | \
     bip32gen -v \
     -i entropy -f - -x \
     -o privkey,wif,pubkey,addr,xprv,xpub -F - -X \
@@ -111,6 +111,77 @@ $echo 000102030405060708090A0B0C0D0E0F | \
 
 (output not listed)
 
+BIP0032 outlines a hierarchy where individual "accounts" and key series have the following form:
+
+```
+m/ih/0/k - Receiving address series for account 'i', with 'k' as index
+m/ih/1/k - Change address series for spends from account 'i', with 'k' as index
+```
+
+So, to give someone the ability to create receving addresses for
+account 0, (but not the ability to spend from those addresses), one
+would export an _extended public key_ for m/0h/0 (we'll use again the
+entropy from BIP0032 test vector #1 for purpose of explanation, but of
+course this would be unique for each situation):
+
+```
+$ echo 000102030405060708090A0B0C0D0E0F | \
+    bip32gen \
+    -i entropy -f - -x \
+    -o xpub -F - \
+    m/0h/0
+xpub6ASuArnXKPbfEVRpCesNx4P939HDXENHkksgxsVG1yNp9958A33qYoPiTN9QrJmWFa2jNLdK84bWmyqTSPGtApP8P7nHUYwxHPhqmzUyeFG
+```
+
+Then, to derive public child keys, that person would run the
+key generator using that extended public key as input:
+
+```
+$ echo xpub6ASuArnXKPbfEVRpCesNx4P939HDXENHkksgxsVG1yNp9958A33qYoPiTN9QrJmWFa2jNLdK84bWmyqTSPGtApP8P7nHUYwxHPhqmzUyeFG | \
+     bip32gen \
+     -i xpub -f - \
+     -o addr -F - \
+     0 1 2 3 4 5 6 7 8 9
+1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr
+1B1TKfsCkW5LQ6R1kSXUx7hLt49m1kwz75
+1D2LvY1T3yT4xWgoXkXhAbh1fbY39owifJ
+1L71JnrWfB45Z1g2et1zeDAkzrpY8eyJMH
+1ACa2mfirthEwmnHVHcBEAVfTHJkajpjod
+1CR1rZqA8cwbohoj9bNmcrYxx31Zx2jw4c
+1PkyqPChrqwM1dee8KTMpsWWBuXgmGVNoi
+1L3HVcGagSUEb2d24SfHV7Kyu6kUNpDL51
+17JbSP83rPWmbdcdtiiTNqBE8MgGN8kmUk
+1MWb4Pv4ZCUmbnFgA5D3MtYyhMh4q8KCrd
+```
+An offline machine could generate the corresponding private keys to
+spend from those addresses by using an _extended private key_ for the
+account:
+```
+$ echo 000102030405060708090A0B0C0D0E0F | \
+    bip32gen \
+    -i entropy -f - -x \
+    -o xprv -F - \
+    m/0h/0
+xprv9wTYmMFdV23N21MM6dLNavSQV7Sj7meSPXx6AV5eTdqqGLjycVjb115Ec5LgRAXscPZgy5G4jQ9csyyZLN3PZLxoM1h3BoPuEJzsgeypdKj
+```
+Then to generate the corresponding private keys (here shown in wallet import format):
+```
+$ echo xprv9wTYmMFdV23N21MM6dLNavSQV7Sj7meSPXx6AV5eTdqqGLjycVjb115Ec5LgRAXscPZgy5G4jQ9csyyZLN3PZLxoM1h3BoPuEJzsgeypdKj | \
+     bip32gen \
+     -i xprv -f - \
+     -o wif -F - \
+     0 1 2 3 4 5 6 7 8 9
+L3dzheSvHWc2scJdiikdZmYdFzPcvZMAnT5g62ikVWZdBewoWpL1
+L22jhG8WTNmuRtqFvzvpnhe32F8FefJFfsLJpSr1CYsRrZCyTwKZ
+KwhVMKLLSMt7DemnUxhSftkdqPjWYmPKt31nmV3BB7TdVaMFzqgP
+KySK2geQrXWYR7f2p9C9Exr4CLngFQnnzQegSaKAfxNupqecSwdU
+KxSKj3b3EdHSyN3C5sSwRL7TMmxpEVkJ7Cw4fQTMUYXsCZRbmBAP
+L5kxG5qokHeTJSwco5JzCEdAy5TN2M2Tj2QvxGpvVuSVP5bJRAUT
+L3oTQGyHQvE3GkRQJkgPs9vY8NRTxdwacHu9Xu9QBPTpgHCSGume
+KxABnXp7SiuWi218c14KkjEMV7SjcfXnvsWaveNVxWZU1Rwi8zNQ
+L1Zku8j3mCiiHxZdo6NDLHv6jcA1JyNufUSHBMiznML38vNr9Agh
+L46bxscw878ytxNHro7ghNXuybUv8aNJAY1UudH1HUxD2pecBhR8
+```
 
 Python bip32utils Library
 =========================
