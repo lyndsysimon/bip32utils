@@ -22,6 +22,8 @@ CURVE_GEN       = ecdsa.ecdsa.generator_secp256k1
 CURVE_ORDER     = CURVE_GEN.order()
 FIELD_ORDER     = SECP256k1.curve.p()
 INFINITY        = ecdsa.ellipticcurve.INFINITY
+EX_MAIN_PRIVATE = '0488ade4'.decode('hex') # Version string for mainnet extended private keys
+EX_MAIN_PUBLIC  = '0488b21e'.decode('hex') # Version string for mainnet extended public keys
 
 class BIP32Key(object):
 
@@ -61,9 +63,9 @@ class BIP32Key(object):
 
         # Verify address version/type
         version = raw[:4]
-        if version.encode('hex') == '0488ade4':
+        if version == EX_MAIN_PRIVATE:
             keytype = 'xprv'
-        elif version.encode('hex') == '0488b21e':
+        elif version == EX_MAIN_PUBLIC:
             keytype = 'xpub'
         else:
             raise ValueError("unknown extended key version")
@@ -288,7 +290,7 @@ class BIP32Key(object):
         "Return extended private or public key as string, optionally Base58 encoded"
         if self.public is True and private is True:
             raise Exception("Cannot export an extended private key from a public-only deterministic key")
-        version = '\x04\x88\xB2\x1E' if private is False else '\x04\x88\xAD\xE4'
+        version = EX_MAIN_PRIVATE if private else EX_MAIN_PUBLIC
         depth = chr(self.depth)
         fpr = self.parent_fpr
         child = struct.pack('>L', self.index)
