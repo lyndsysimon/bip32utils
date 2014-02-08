@@ -52,14 +52,10 @@ class BIP32Key(object):
 
         If public is True, return a public-only key regardless of input type.
         """
-        rawchk = Base58.decode(xkey)
-        if len(rawchk) != 82:
+        # Sanity checks
+        raw = Base58.check_decode(xkey)
+        if len(raw) != 78:
             raise ValueError("extended key format wrong length")
-
-        # Verify encoding checksum
-        raw, chk = rawchk[:-4], rawchk[-4:]
-        if (chk != sha256(sha256(raw).digest()).digest()[:4]):
-            raise ValueError("base58 decoding checksum failure")
 
         # Verify address version/type
         version = raw[:4]
@@ -273,8 +269,7 @@ class BIP32Key(object):
     def Address(self):
         "Return compressed public key address"
         vh160 = '\x00'+self.Identifier()
-        raw = vh160+sha256(sha256(vh160).digest()).digest()[:4]
-        return Base58.encode(raw)
+        return Base58.check_encode(vh160)
 
 
     def WalletImportFormat(self):
@@ -282,8 +277,7 @@ class BIP32Key(object):
         if self.public:
             raise Exception("Publicly derived deterministic keys have no private half")
         raw = '\x80' + self.k.to_string() + '\x01' # Always compressed
-        chk = sha256(sha256(raw).digest()).digest()[:4]
-        return Base58.encode(raw+chk)
+        return Base58.check_encode(raw)
 
 
     def ExtendedKey(self, private=True, encoded=True):
@@ -303,8 +297,7 @@ class BIP32Key(object):
         if not encoded:
             return raw
         else:
-            chk = sha256(sha256(raw).digest()).digest()[:4]
-            return Base58.encode(raw+chk)
+            return Base58.check_encode(raw)
 
     # Debugging methods
     #

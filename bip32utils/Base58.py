@@ -4,6 +4,8 @@
 # See LICENSE.txt for distribution terms
 #
 
+from hashlib import sha256
+
 __base58_alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 __base58_radix = len(__base58_alphabet)
 
@@ -31,6 +33,12 @@ def encode(data):
     return __base58_alphabet[0]*n + enc
 
 
+def check_encode(raw):
+    "Encode raw string into Bitcoin base58 with checksum"
+    chk = sha256(sha256(raw).digest()).digest()[:4]
+    return encode(raw+chk)
+
+
 def decode(data):
     "Decode Bitcoin base58 format to string"
     val = 0
@@ -45,8 +53,18 @@ def decode(data):
     return dec
 
 
+def check_decode(enc):
+    "Decode string from Bitcoin base58 and test checksum"
+    dec = decode(enc)
+    raw, chk = dec[:-4], dec[-4:]
+    if chk != sha256(sha256(raw).digest()).digest()[:4]:
+        raise ValueError("base58 decoding checksum error")
+    else:
+        return raw
+
+
 if __name__ == '__main__':
     assert(__base58_radix == 58)
     data = 'now is the time for all good men to come to the aid of their country'
-    enc = encode(data)
-    assert(decode(enc) == data)
+    enc = check_encode(data)
+    assert(check_decode(enc) == data)
