@@ -135,10 +135,10 @@ class BIP32Key(object):
         """
         Calculate the HMAC-SHA512 of input data using the chain code as key.
 
-        Returns a tuple of the HMAC and its left and right halves.
+        Returns a tuple of the left and right halves of the HMAC
         """
         I = hmac.new(self.C, data, hashlib.sha512).digest()
-        return (I, I[:32], I[32:])
+        return (I[:32], I[32:])
 
 
     def CKDpriv(self, i):
@@ -161,7 +161,7 @@ class BIP32Key(object):
             data = self.PublicKey() + i_str
 
         # Get HMAC of data
-        (I, Il, Ir) = self.hmac(data)
+        (Il, Ir) = self.hmac(data)
 
         # Construct new key material from Il and current private key
         Il_int = string_to_int(Il)
@@ -195,7 +195,7 @@ class BIP32Key(object):
         data = self.PublicKey() + struct.pack(">L", i)
 
         # Get HMAC of data
-        (I, Il, Ir) = self.hmac(data)
+        (Il, Ir) = self.hmac(data)
 
         # Construct curve point Il*G+K
         Il_int = string_to_int(Il)
