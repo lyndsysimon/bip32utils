@@ -14,7 +14,7 @@ def __string_to_int(data):
     "Convert string of bytes Python integer, MSB"
     val = 0
     for (i, c) in enumerate(data[::-1]):
-        val += (256**i)*ord(c)
+        val += (256**i) * c
     return val
 
 
@@ -29,13 +29,15 @@ def encode(data):
         enc = __base58_alphabet[val] + enc
 
     # Pad for leading zeroes
-    n = len(data)-len(data.lstrip('\0'))
+    n = len(data)-len(str(data).lstrip('\0'))
     return __base58_alphabet[0]*n + enc
 
 
 def check_encode(raw):
     "Encode raw string into Bitcoin base58 with checksum"
-    chk = sha256(sha256(raw).digest()).digest()[:4]
+    raw = bytearray(raw.encode('utf-8'))
+
+    chk = bytearray(sha256(sha256(raw).digest()).digest()[:4])
     return encode(raw+chk)
 
 
@@ -44,23 +46,27 @@ def decode(data):
     val = 0
     for (i, c) in enumerate(data[::-1]):
         val += __base58_alphabet.find(c) * (__base58_radix**i)
-    dec = ''
+    dec = []
     while val >= 256:
         val, mod = divmod(val, 256)
-        dec = chr(mod) + dec
+        dec.append(int(mod))
     if val:
-        dec = chr(val) + dec
-    return dec
+        dec.append(int(val))
+    return ''.join([chr(x) for x in dec[::-1][:-4]]), dec[::-1][-4:]
 
 
 def check_decode(enc):
     "Decode string from Bitcoin base58 and test checksum"
-    dec = decode(enc)
-    raw, chk = dec[:-4], dec[-4:]
-    if chk != sha256(sha256(raw).digest()).digest()[:4]:
+    data, provided_check = decode(enc)
+    computed_check = sha256(sha256(data.encode('utf-8')).digest()).digest()[:4]
+
+    if isinstance(computed_check[0], bytes):
+        computed_check = [int(ord(i)) for i in computed_check]
+
+    if bytes(provided_check) != bytes(computed_check):
         raise ValueError("base58 decoding checksum error")
     else:
-        return raw
+        return data
 
 
 if __name__ == '__main__':
